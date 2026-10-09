@@ -1,0 +1,96 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn(uid) {
+      return request.auth != null && request.auth.uid == uid;
+    }
+    function validSettings(v) {
+      return v is map
+        && v.keys().hasOnly(['language','region','providers','maturityConfirmed','updatedAt'])
+        && v.language in ['ar','en']
+        && v.region in ['E','K','C','J','any']
+        && v.providers is list && v.providers.size() <= 50
+        && v.maturityConfirmed is bool;
+    }
+    function validOnboarding(v) {
+      return v is map
+        && v.keys().hasOnly(['completed','skippedAll','completedAt','sections','answers','lastStepId','updatedAt'])
+        && v.completed is bool && v.skippedAll is bool
+        && v.sections is list && v.sections.size() <= 30
+        && v.answers is map && v.answers.keys().size() <= 35;
+    }
+    function validSession(v) {
+      return v is map
+        && v.keys().hasOnly(['answers','shownIds','excludedIds','retryCount','negativeSignals','relaxationLog','updatedAt'])
+        && v.answers is map
+        && v.shownIds is list && v.shownIds.size() <= 2000
+        && v.excludedIds is list && v.excludedIds.size() <= 2000
+        && v.negativeSignals is list && v.negativeSignals.size() <= 300
+        && v.relaxationLog is list && v.relaxationLog.size() <= 100
+        && v.retryCount is int && v.retryCount >= 0;
+    }
+    function validProfile() {
+      return request.resource.data.keys().hasOnly(['schemaVersion','profile','settings','onboarding','presets','recentSearches','suggestSession','updatedAt'])
+        && request.resource.data.schemaVersion is int
+        && request.resource.data.schemaVersion >= 1
+        && request.resource.data.profile is map
+        && request.resource.data.profile.keys().hasOnly(['displayName','email'])
+        && request.resource.data.profile.displayName is string
+        && request.resource.data.profile.displayName.size() <= 100
+        && request.resource.data.profile.email is string
+        && request.resource.data.profile.email == request.auth.token.email
+        && validSettings(request.resource.data.settings)
+        && validOnboarding(request.resource.data.onboarding)
+        && validSession(request.resource.data.suggestSession)
+        && request.resource.data.presets is list
+        && request.resource.data.presets.size() <= 30
+        && request.resource.data.recentSearches is list
+        && request.resource.data.recentSearches.size() <= 20
+        && request.resource.data.updatedAt is string
+        && request.resource.data.updatedAt.size() <= 40;
+    }
+    function validLibraryItem(id) {
+      return id.matches('^(movie|tv)_[0-9]+$')
+        && request.resource.data.keys().hasOnly([
+          'id','type','title','poster_path','genre_ids','original_language',
+          'origin_country','vote_average','runtime','isAnime','status','progress',
+          'rating','liked','notInterested','dislikedReason','addedAt','updatedAt',
+          'completedAt','schemaVersion'
+        ])
+        && request.resource.data.id is int
+        && request.resource.data.id > 0
+        && id == request.resource.data.type + '_' + string(request.resource.data.id)
+        && request.resource.data.type in ['movie','tv']
+        && request.resource.data.title is string
+        && request.resource.data.title.size() <= 400
+        && request.resource.data.status in ['watching','completed','planned','dropped','seen_unrated']
+        && request.resource.data.genre_ids is list
+        && request.resource.data.genre_ids.size() <= 40
+        && request.resource.data.progress is map
+        && request.resource.data.progress.keys().hasOnly(['season','episode','watchedEpisodes'])
+        && request.resource.data.progress.watchedEpisodes is list
+        && request.resource.data.progress.watchedEpisodes.size() <= 5000
+        && request.resource.data.liked is bool
+        && request.resource.data.notInterested is bool
+        && (request.resource.data.rating == null || (
+          request.resource.data.rating is number
+          && request.resource.data.rating >= 1
+          && request.resource.data.rating <= 10))
+        && request.resource.data.updatedAt is string
+        && request.resource.data.updatedAt.size() <= 40;
+    }
+    match /users/{uid} {
+      allow read: if signedIn(uid);
+      allow create, update: if signedIn(uid) && validProfile();
+      allow delete: if signedIn(uid);
+      match /library/{itemId} {
+        allow read: if signedIn(uid);
+        allow create, update: if signedIn(uid) && validLibraryItem(itemId);
+        allow delete: if signedIn(uid);
+      }
+    }
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
